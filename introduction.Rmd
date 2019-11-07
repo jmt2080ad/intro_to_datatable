@@ -1,0 +1,383 @@
+---
+title: Intro to `data.table`
+fontsize: 9pt
+output:
+  beamer_presentation:
+    theme: "Dresden"
+    colortheme: "rose"
+    fonttheme: "professionalfonts"
+---
+
+# Why are we here?
+
+You want to know about `data.table`.
+
+I know somethings about `data.table`.
+
+Why do I use it?
+
+Let's load `data.table` and find out!
+
+```{r}
+library(data.table)
+```
+
+# It's terse --->>> *It's fast* --->>> It's `base`-ic
+
+`data.table` is a short jump from base R and you get a big boost in speed with less typing.
+
+Reading in data and subsetting is really familiar.
+
+```{r}
+# base R
+df <- read.csv("./data/slides/mergtab.csv")
+df[df$fname== "Jack",][1:2,]
+
+# data.table
+dt <- fread("./data/slides/mergtab.csv")
+dt[fname == "Jack",][1:2,]
+```
+
+`fread()` is fast, versatile, and never defaults strings to factors.
+
+# `dt[i, j, by / with / on / SDCols]`
+
+Base R subsetting using `[` already had a SQL like interface.
+
+This...
+
+```{r, eval = F}
+df[<subset rows expression> , <subset columns expression>]
+```
+
+...is like saying...
+
+```{r, eval = F}
+df[<WHERE> , <SELECT>]
+```
+
+# `dt[i, j, with / by / on / SDCols]`
+
+`data.table`'s `[` function acts like base R but has some additional arguments.
+
+`[i, j]` work the same, more or less, like SQL:
+
+`dt[<WHERE>, <SELECT>]`
+
+* `with` allows to call columns using strings
+* `by` allows for performing operations in groups of unique values, like SQL's `GROUP BY` operation
+* `on` is used when using `[` as a merge operator
+
+SPOILER ALERT: `j` can evaluate whole expressions! 
+
+# Using `with` and `data.table`'s variable scope
+
+Unlike `data.frame`, `data.table` will look for variables using the `data.table` object's namespace.
+
+What does this mean? Less typing!
+
+```{r}
+# base R
+df[df$fname == "Jack" &
+   as.Date(df$date) > as.Date("2019-11-02") &
+   df$type == "desktop",]
+unique(df[, c("lname")])
+```
+
+# Using `with` and `data.table`'s variable scope
+
+```{r}
+# data.table
+dt[fname == "Jack" & date > "2019-11-02" & type == "desktop",]
+unique(dt[, .(fname, lname)])
+```
+
+# Using `with` and `data.table`'s variable scope
+
+In base R, you can use `with()` to search a data.frame's scope for variable names.
+
+```{r}
+with(df, unique(uid))
+with(df, df[fname == "Jill" & type == "phone",])
+```
+
+# Using `with` and `data.table`'s variable scope
+
+`data.table` does this by default.
+
+```{r}
+unique(dt[,uid])
+dt[fname == "Jill" & type == "phone",]
+```
+
+# Using `with` and `data.table`'s variable scope
+
+With data.frame you can pass a variable of column names to subset a table.
+
+```{r}
+colNames <- c("fname", "type", "date")
+df[df$fname == "Gretel", colNames][1,]
+```
+
+Using `with = FALSE` brings back that behavior to data.table, that is, if you store the column names in a variable then use `with = FALSE` to call those names as you would with a `data.frame`.
+
+```{r}
+colNames <- c("fname", "type", "date")
+dt[fname == "Gretel", colNames, with = F][1,]
+```
+
+# Using `with` and `data.table`'s variable scope
+
+This main message here is that a `data.table` object will always look
+in it's own namespace first for variables. This makes subsetting a
+`data.table` object easier.
+
+# Using `by`
+
+`by` acts like SQL `GROUP BY`. It performs operations by unique values in a given column on an expression passed to `j`.
+
+```{r}
+dt[, sum(type == "desktop"), by = .(fname)]
+```
+
+You could also do:
+
+```{r, eval = F}
+dt[, sum(type == "desktop"), by = c("fname")]
+```
+
+# Using `by` with `.()`
+
+Now is also a good time to introduce `.()`. 
+
+`.()` is `data.table` short hand for `list()` and it is used for concatenating variables in a `data.table`'s namespace
+
+```{r}
+unique(dt[, .(fname, type)])
+```
+
+# Using `by` with `.()`
+
+```{r}
+dt[, .(session_cnt = sum(type == "phone")), by = .(fname)]
+```
+
+# Chaining `by`
+
+Chaining `data.table` is awesome. 
+
+```{r}
+dt[, .(con_cnt = sum(type %like% "desktop|phone")), by = .(fname)
+   ][, .(fname, con_cnt, con_perc = con_cnt / sum(con_cnt) * 100)]
+```
+
+You can chain `data.table` all day long...
+
+```{r}
+dt[, .(con_cnt = sum(type %like% "desktop|phone")), by = .(fname)
+   ][, .(fname, con_cnt, con_perc = con_cnt / sum(con_cnt) * 100)
+     ][con_perc == max(con_perc),]
+```
+
+# Adding columns by reference
+
+`data.table` allows for adding columns by reference and uses an
+operator type syntax, `:=`.
+
+This makes a big difference in performance when working with large
+datasets.
+
+```{r}
+dt[, isGerman := ifelse(ccode == "DE", 1, 0)]
+dt[, isGermanPhone := as.numeric(isGerman & type == "phone")]
+head(dt[,-c("date")])
+```
+
+# Adding columns by reference
+
+And, this operation can be done multiple times as a single call using
+two different methods.
+
+```{r}
+## calling `:=` using function call syntax
+dt[, `:=`(
+    isGerman = ifelse(ccode == "DE", 1, 0),
+    isGermanPhone = as.numeric(isGerman & type == "phone")
+    )]
+
+## calling `:=` through chaining
+dt[, isGerman := ifelse(ccode == "DE", 1, 0)
+   ][, isGermanPhone := as.numeric(isGerman & type == "phone")]
+
+```
+
+# Using `.N` and `.SD`
+
+`data.table` has special variables that can be used in `j`.
+
+* `.N` counts the number of records in a given group
+* `.SD` passes a subset of a group's `data.table`
+
+`.N` adds a row count as a field. This is similar to `table()`.
+
+```{r}
+dt[, .N, by = fname]
+```
+
+# Using `.N`
+
+```{r}
+dt[, .N]
+dt[, .N, by = .(fname, type)
+   ][N > 3 & type == "phone"]
+```
+
+# Using `.SD` - "*S*ub *D*ata table"
+
+Will return subsets of the data.table object using the `by`
+argument. The use of `.SD` can best be shown using a print statement
+in `j`.
+
+```{r}
+dt[,
+   print(
+       .SD[, .N, by = .(fname, lname)]
+   ), by = .(uid)]
+```
+
+# Using `.SD`
+
+```{r}
+dt[,
+   .SD[, .(
+       maxDate = max(date),
+       totalPhone = sum(type == "phone"),
+       totalDesktop = sum(type == "desktop")
+   )],
+   by = .(uid)]
+```
+
+# Using `merge`
+
+`merge` can be used in two ways:
+
+* the base-ic way: `merge(x, y)`
+* the data.table way: `y[x]`
+
+That's right, `[` is also used for merges. 
+
+# Using `[` for merging
+
+I go back and forth using this syntax. 
+
+`[` feels a bit too implicit to me, but it's great in chains.
+
+`y[x]`
+
+This is equivalent to `merge(x, y, all.x = T)`
+
+Using this syntax, you also need to use the `on` argument.
+
+`y[x, on = "<joincolumn>"]`
+
+# Using `dcast`
+
+*Super Great Casting*
+
+`dcast` works like `reshape::cast`, but it can also do multi-variable casting.
+
+```{r}
+dcast(dt, fname~type+ccode, value.var = "fname")
+```
+
+`data.table` can also `melt`.
+
+# `set` functions
+
+Mutability can make a gigantic difference when concerned with performance. 
+
+data.table offers some methods for setting column names and order that don't copy data.
+
+* `setnames`
+* `setorder`
+* `setcolorder`
+
+# `set` functions
+
+Setting column names with `setnames`: 
+
+```{r}
+names(dt)
+setnames(dt, c("fname", "lname"), c("firstname", "lastname"))
+names(dt)
+```
+
+# `set` functions
+
+Setting column order with `setcolorder`:
+
+```{r}
+names(dt)
+setcolorder(dt, c("lastname", "firstname"))
+names(dt)
+```
+
+# `set` functions
+
+Setting row order with `setorder`:
+
+```{r}
+setorder(dt, uid, date)
+head(dt[,c(1:4)])
+```
+
+Know that there are two versions of this, one that accepts strings and
+one that looks for variables in the `data.table` namespace.
+
+See `?setorder` for more details.
+
+# `setKey` and indexing
+
+On thing that can make `data.table` very fast is the use of indexes
+and keys.
+
+* performance boost for large `data.table` join or subset operations
+* no need to define `on` arguments when merging
+
+# `setKey` and indexing
+
+```{r}
+uids <- fread("./data/slides/usertab.csv")
+conn <- fread("./data/slides/conntab.csv")
+
+setkey(uids, uid)
+setkey(conn, uid)
+
+head(uids[conn])
+```
+
+# Putting some of this stuff together...
+
+What does this do?
+
+```{r eval=F}
+dt[lname == "Woods", note:="Don't talk about witches"]
+```
+
+# Assigning IDs by group...
+
+```{r eval=F}
+dt[, conn:=(1:.N), by = .(uid, type, date)]
+```
+
+# Grouping and chaining
+
+```{r eval=F}
+dt[, firstCon := date == min(date) & con == 1, by = uid
+   ][, firstConIsDesk := firstCon & device == "desktop"
+     ][ firstConIsDesk == 1 ]
+```
+
+# 
+
+Lets work with some data!
