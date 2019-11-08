@@ -234,7 +234,7 @@ dt[, .N, by = .(fname, type)
 
 # Using `.SD` - "*S*ub *D*ata table"
 
-Will return subsets of the data.table object using the `by`
+This will return subsets of the data.table object using the `by`
 argument. The use of `.SD` can best be shown using a print statement
 in `j`.
 
@@ -328,7 +328,7 @@ Setting row order with `setorder`:
 
 ```{r}
 setorder(dt, uid, date)
-head(dt[,c(1:4)])
+head(dt[,c(1:6)])
 ```
 
 Know that there are two versions of this, one that accepts strings and
